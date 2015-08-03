@@ -165,6 +165,7 @@ public class InternalRemoteRunner extends BlockJUnit4ClassRunner {
                     break;
                 } else if (line.startsWith("RERROR")) {
                     StringBuilder error = new StringBuilder(line.substring(6));
+                    error.append("\n");
                     while ((line = reader.readLine()) != null) {
                         error.append(line).append("\n");
                     }

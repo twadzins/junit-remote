@@ -3,6 +3,7 @@ package com.tradeshift.test.remote;
 import java.io.IOException;
 import java.net.Socket;
 import java.net.URI;
+import java.util.concurrent.CountDownLatch;
 
 import org.junit.runner.Description;
 import org.junit.runner.Runner;
@@ -25,26 +26,66 @@ public class RemoteTestRunner extends Runner implements Filterable, Sortable {
     private static final Logger log = LoggerFactory.getLogger(RemoteTestRunner.class);
 
     private Runner delegate;
+    private static CountDownLatch serverCountdown = new CountDownLatch(1);
 
     public RemoteTestRunner(Class<?> clazz) throws InitializationError {
-        Remote remote = Utils.findAnnotation(clazz, Remote.class);
-        String endpoint;
-        Class<? extends Runner> remoteRunnerClass;
-        if (remote != null) {
-            endpoint = remote.endpoint();
-            remoteRunnerClass = remote.runnerClass();
-        } else {
-            endpoint = "http://localhost:4578/";
-            remoteRunnerClass = BlockJUnit4ClassRunner.class;
+        this(clazz, null, null);
+    }
+
+    public RemoteTestRunner(Class<?> clazz, Class<? extends Runner> remoteRunnerClass, String endpoint) throws InitializationError {
+        if (remoteRunnerClass == null) {
+            Remote remote = Utils.findAnnotation(clazz, Remote.class);
+            if (remote != null) {
+                endpoint = remote.endpoint();
+                remoteRunnerClass = remote.runnerClass();
+            } else {
+                endpoint = "http://localhost:4578/";
+                remoteRunnerClass = BlockJUnit4ClassRunner.class;
+            }
         }
-        log.debug("Trying remote server {} with runner {}", endpoint, remoteRunnerClass.getName());
+
+        log.info("Trying remote server {} with runner {}", endpoint, remoteRunnerClass.getName());
         if (isAnyRemoteUp(endpoint)) {
             delegate = new InternalRemoteRunner(clazz, endpoint, remoteRunnerClass);
+        } else if (isJrebelActive()) {
+            startServer(endpoint);
+            delegate = new InternalRemoteRunner(clazz, endpoint, remoteRunnerClass);
+            try {
+                serverCountdown.await();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         } else {
         	delegate = Utils.createRunner(remoteRunnerClass, clazz);
         }
     }
-    
+
+    private void startServer(String endpoint) {
+        Thread thread = new Thread() {
+            @Override
+            public void run() {
+                String[] foo = new String[0];
+                try {
+                    RemoteServer.main(foo);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        thread.setDaemon(true);
+        thread.start();
+        //throw new RuntimeException("TODO: finish me");
+    }
+
+    private boolean isJrebelActive() {
+        try {
+             Class.forName("org.zeroturnaround.javarebel.ClassEventListener");
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+        return true;
+    }
+
     private boolean isAnyRemoteUp(String eps) {
     	for (String ep : eps.split(",")) {
     		URI uri = URI.create(ep.trim());
